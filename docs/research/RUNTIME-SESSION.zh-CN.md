@@ -210,3 +210,60 @@ available = record[0x12] ? record[0x13] : 0        # node + 0x3a / +0x3b
 
 失败模式要提前接受：app 可能按"允许列表"校验该值并把非法值改回默认。
 若如此，则说明这是一层真正的白名单，必须回到固件侧改菜单数据。
+
+## 9. 第三轮：属性侧实测（读 / 差分 / 写）
+
+本轮验证了"不经过 UI 直接改按键绑定"这条路的可行性，结论是**目前走不通**，原因逐条记录如下。
+
+### 9.1 会话骨架的正确用法（踩坑记录）
+
+`analysis/camprop.py` / `camset.py` / `camdump.py` 都基于 a7c2-re 的 `camread2.build_module()`
+会话骨架。要让它工作必须同时满足：
+
+1. `product_info()` 里**先** `self.wire_phase = "product"`，否则第一条请求就被
+   `JiritsuSession.write()` 判成 `wrong_protocol_phase`；
+2. 备份属性读写会绕过该守卫，所以 `Session` 子类必须**同时**重写 `write()` 和 `read()`，
+   在 `allow_backup` 为真时直接打 `dev.write/read`（只重写 `read()` 会出现
+   `request_not_allowlisted`）。
+
+### 9.2 自定义键那组 1 字节属性不是"绑定"
+
+`AP 索引 = 319 + 2k` 算出的 `BKID_APP_SETTING_CUSTOM_KEY_SHOOT_STILL_*` 落在
+`0x02CF0509 … 0x02CF0541`，布局为**奇数索引=当前值（1 字节）、其后偶数索引=13 份 MR 副本**。
+实测值：C 键 `00`、中央键 `01`、MOVIE `02`、左 `03`、右 `04`、多选择器 `07`、
+AEL/AF-ON `0a`、放大 `0d`、下 `0f`。
+
+**反证**：让用户在机身把 MOVIE 键改成"切换静音模式"并断电重启，再读 `0x02CF053D`
+仍然是 `02`。→ 这组值是"物理按键槽位标识"，**不是功能绑定**。
+
+### 9.3 差分扫描：绑定不在 0x300–0x6FF
+
+`analysis/camdump.py` 一次会话读 1024 个属性（`0x300–0x6FF`），两次差分。
+用户改了 AF-ON（跟踪+中央AF → 对焦模式）与 MOVIE（静音切换 → APS-C/全幅选择）之后，
+**没有任何自定义键相关属性变化**；变化的只有：
+
+```
+0x2cf041b  PRM_setting_drive_mode_self_timer_for_hw_position         c3090000 -> 22010000
+0x2cf041c  PRM_setting_drive_mode_white_bracket_for_hw_position      05030000 -> 00030000
+```
+
+两条都是驱动模式相关，与自定义键无关。→ 功能绑定**不在** `0x2cf` 的这个区间里
+（`0x2cf` 共 6553 项，本次只覆盖 16%）。
+
+### 9.4 写路径现状
+
+`analysis/camset.py` 的 `writeBackup` 在 pmca 层抛 `TypeError`，被 `service_probe`
+包成 `dependency_error`，没有留下 traceback。**写入尚未成功过一次**，需要先修这个。
+（`camprop`/`camdump` 的读路径是好的，320 / 1024 项都能读满。）
+
+### 9.5 下一步（按代价排序）
+
+1. 修 `writeBackup` 的 `TypeError`（在 `analysis/` 下单独起一个直连 pmca 的会话，绕开
+   `service_probe` 的异常包装，拿到真实 traceback）；
+2. 扩差分范围：`0x2cf` 全组 6553 项（一次会话约 1–2 分钟），用"改一处 → 再扫 → 差分"
+   找真正的绑定属性；
+3. 若确认绑定不在 AP 属性里，则它只能落在 app 自己的 `BKID` 之外的存储（例如
+   `/setting` 下的数据库文件），那时再考虑直接改文件。
+
+**目前仍未达成**：把 `FUNC_hold_spot_boost_shooting` 绑到某个键上。
+`patches_spotboost.json` 保持 `status: "unresolved"`。
