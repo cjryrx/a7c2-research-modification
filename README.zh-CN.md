@@ -9,6 +9,21 @@
 当前该环节为 `status: "unresolved"`：**补丁字节未定位，构建会被拒绝，不会产出包**。
 分析证据、数据格式与真机验证计划见 [windows/runtime/release/SPOTBOOST.zh-CN.md](windows/runtime/release/SPOTBOOST.zh-CN.md)。
 
+## 参考项目（先读这一节）
+
+本仓库是下列公开研究的**fork 与使用者**。上游作者都**没有**为本 fork 的结论或补丁背书。
+
+| 项目 | 本仓库用到了什么 | 许可 |
+| --- | --- | --- |
+| **[YuuLuo/a7c2-camera-tools](https://github.com/YuuLuo/a7c2-camera-tools)** | **本仓库 fork 的全部上游工具链**（DAT 构建、p1 门控、BK4 提交、CP 颜色/音效补丁、Windows/macOS 安装器）。`burst boost button` 环节是唯一新增。 | GPL-3.0-only |
+| [YuuLuo/a7c2-service-preload](https://github.com/YuuLuo/a7c2-service-preload) | 服务模式认证与机内执行链，运行时探针建立在其上 | 见上游 |
+| [ma1co/Sony-PMCA-RE](https://github.com/ma1co/Sony-PMCA-RE) | USB 枚举、Senser 两段式认证与 `SonySenserCamera` API（`windows/runtime/core/pmca/`，以及 libJit 运行时路线用的 vendored 副本） | MIT |
+| [ma1co/fwtool.py](https://github.com/ma1co/fwtool.py) | 官方更新包解包的参照实现 | MIT |
+| [QAQLeonard/a7c2-fl23-research](https://github.com/QAQLeonard/a7c2-fl23-research) · [lzh2016zzz/a7cr-fl23-research](https://github.com/lzh2016zzz/a7cr-fl23-research) | libJit `dlopen` 执行入口，以及 FL2/FL3 的启用方法论（本仓库独立复核过） | 见上游 |
+
+[docs/research/](docs/research/) 下的内容是本 fork 自己的分析（连拍加速按键的门控排查 + 一次真机运行时会话记录），
+**只含地址与哈希，不含任何索尼固件原文或修改件**，并由 `.gitignore` 强制约束。
+
 ## 功能
 
 | 选择 | 固件改动 | 更新后处理 |
