@@ -1,0 +1,8 @@
+# Runtime dependencies for bind_button.
+#
+# pyusb           USB access from Python (the camera's bulk + control endpoints)
+# libusb-package  bundles a libusb-1.0 DLL so Windows needs no system-wide install
+# pycryptodomex   SHA-256 for Sony-PMCA-RE's Senser authentication handshake
+pyusb>=1.2.1
+libusb-package>=1.0.26.0
+pycryptodomex>=3.19

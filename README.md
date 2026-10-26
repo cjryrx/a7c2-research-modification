@@ -1,63 +1,111 @@
-# A7C II Camera Tools（fork: burst boost button）
+# bind_button
 
-[简体中文](README.zh-CN.md)
+Re-bind a Sony camera button by writing one AP property -- no firmware patch.
 
-Research and reproducible firmware tools for the Sony ILCE-7CM2. The installer builds a version 2.00 package from a user-supplied, unmodified official 2.01 DAT; the normal official 2.01 update path remains available afterward.
+**Target**: Sony ILCE-7CM2 (A7C II), verified end to end on real hardware.
 
-**This fork adds exactly one patch stage on top of upstream: `burst boost button`** (Sony's
-`Cnt Shoot Speed Boost` / 連写速度ブースト) — a custom-key function that raises the continuous
-shooting speed while the assigned button is held or toggled. It runs as an overlay on an
-already-built 2.00 package and does not touch any upstream patch byte or pinned hash.
-The stage is currently `status: "unresolved"`: **the gate bytes are not located yet, so the
-stage refuses to build.** Evidence and the on-device plan:
-[windows/runtime/release/SPOTBOOST.zh-CN.md](windows/runtime/release/SPOTBOOST.zh-CN.md).
-
-## References / 参考项目（read this first）
-
-This work is a fork of, and stands on, the following public research. **None of the upstream
-authors endorse this fork's conclusions or its patches.**
-
-| Project | What this repository uses | License |
-| --- | --- | --- |
-| **[YuuLuo/a7c2-camera-tools](https://github.com/YuuLuo/a7c2-camera-tools)** | **the entire upstream toolchain this repository is forked from** (DAT builder, p1 gate, BK4 commit, CP color/sound patches, Windows/macOS installers). The `burst boost button` stage is the only addition. | GPL-3.0-only |
-| [YuuLuo/a7c2-service-preload](https://github.com/YuuLuo/a7c2-service-preload) | the service-mode authentication and on-camera execution chain that the runtime probes build on | as published upstream |
-| [ma1co/Sony-PMCA-RE](https://github.com/ma1co/Sony-PMCA-RE) | USB enumeration, Senser two-stage authentication and the `SonySenserCamera` API (`windows/runtime/core/pmca/`, and the vendored copy used by the libJit runtime route) | MIT |
-| [ma1co/fwtool.py](https://github.com/ma1co/fwtool.py) | reference for unpacking official update packages | MIT |
-| [QAQLeonard/a7c2-fl23-research](https://github.com/QAQLeonard/a7c2-fl23-research) · [lzh2016zzz/a7cr-fl23-research](https://github.com/lzh2016zzz/a7cr-fl23-research) | the libJit `dlopen` execution entry and the FL2/FL3 enablement methodology this repository independently re-verified | as published upstream |
-
-Everything under [docs/research/](docs/research/) is this fork's own analysis
-(spot-boost gate hunting plus a runtime session log). It contains addresses and hashes only —
-**no Sony firmware, original or modified**, and `.gitignore` enforces that.
-
-## Features
-
-| Selection | Firmware changes | Post-update work |
-| --- | --- | --- |
-| FL2/FL3 | Enables the two Creative Look modes, playback icons and photo metadata | Writes the live CP color table and checks both BK4 copies |
-| Electronic shutter sound | Enables the capture sound path and two sound menu choices | Uses the camera's built-in sound or user audio; leaves FL2/FL3 color properties unchanged |
-| Both | Combines both sets of changes in one DAT | Performs the FL2/FL3 color steps and checks the sound |
-| **Burst boost button (fork only)** | Overlays the byte spans declared in `patches_spotboost.json` on the built 2.00 package | Cold-start check that `Cnt Sht Spd Bst Hold/Toggle` appears in the custom-key list |
-
-Sound can use the camera's original sample at its original level without an uploaded file. Custom sound accepts an MP3/WAV of up to 2 seconds and a **1–100%** level.
+**Status**: the mechanism and the write path are proven; the compact function id
+for *Continuous Shooting Speed Boost* is **still unknown**. The tool therefore
+takes the id as a parameter (`--function-id`) and never guesses one.
 
 ## How it works
 
-1. The camera connects in USB Mass Storage mode (`054C:0E8A`). The host authenticates and switches it to service mode (`054C:0336`), where Jiritsu file commands are available.
-2. A bounded AArch64 worker is staged in the camera's Work area. Service commands set a preload entry and trigger a child process. The host checks the versioned, checksummed result, removes the preload entry and verifies the return to normal USB mode. See the [service probes](windows/runtime/core/sony-service-research/).
-3. Read-only captures of p1 and both BK4 copies establish the camera baseline. The selected 2.00 DAT is fully decrypted for verification, copied to the photo card and read back by full hash. A temporary p1 patch opens the update version gate; the original p1 is restored after the camera update.
-4. FL2/FL3 connects mode paths already present in the camera and supplies four color-property rows converted from FX2-format functional parameters. The sound patch connects the camera's existing KindID 3 shutter sample. Custom mode also extends `SYSSOUND.BIN` and updates sound registration in the main application and boot overlay.
+A custom-key binding is a 4-byte little-endian "compact function id" stored in
+AP property group `0x02CF`, in the contiguous slot run `0x0404 .. 0x041F`.
+The key is `group << 16 | index`, so AF-ON is `0x02CF041B` and MOVIE is
+`0x02CF041C`. The app reads these slots **at boot only**, which is why the tool
+writes, saves, reads back, and then asks you to power-cycle the body.
 
-A7C II 2.01 already contains FL2/FL3 menu resources and shared processing code. This project enables the missing routing and supplies color parameters; it does not transplant the full FX2 imaging program.
+```
+bind --slot 0x041B --function-id 0x300
+  read 0x02CF041B -> 22010000 (0x122 Focus Mode)
+  guard: length must stay 4 bytes, otherwise refuse
+  write 22010000 -> 00030000 (0x300 APS-C/Full-frame select)
+  read back == new value
+  saveBackup(0x02CF)
+  read back == new value            -> "power-cycle the camera to apply"
+```
 
-## Run
+Known compact ids: `0x122` Focus Mode, `0x300` APS-C/Full-frame select,
+`0x305` Toggle Silent Mode, `0x9C3` Tracking On + Center Area AF.
+Write slot `0x041B` = AF-ON, `0x041C` = MOVIE.
 
-| Platform | Entry |
-| --- | --- |
-| Windows 10/11 | [windows/run.bat](windows/run.bat) · [setup](windows/README.md) |
-| macOS | [macos/run.command](macos/run.command) |
+## Safety
 
-Place your own official 2.01 DAT beside the launcher. Both platforms use a fixed-screen Chinese/English interface and save per-camera resume records. The workflow has run on Windows 10, Windows 11 and macOS with mainland China and Japanese-market bodies.
+* **No firmware** is read or written: no DAT, no `appFw.so`, no partition image,
+  no capture, no serial number. The only camera-side effect is one 4-byte AP
+  property plus one `saveBackup(0x02CF)`.
+* **Hard length guard**: a write is refused unless the new payload has exactly
+  the length of the value currently stored (`--force` does not override it).
+* **Hard range limit**: only group `0x02CF`, only indices `0x0400..0x0430`.
+* **Receipt first**: the previous value is written to `receipts/*.json` *before*
+  the camera is touched; `restore --receipt` writes it back.
+* **USB service sessions can be unstable** on this body: a session may time out,
+  reboot the camera, or leave it on the service identity (`054c:096f`). Unplug,
+  or pull the battery for ~30 s, then retry.
+* Only use this on hardware you own.
 
-The repository contains project code, patch descriptions and driver files, but no Sony firmware, camera captures, generated DAT, user audio or run logs. Original project code is [GPL-3.0-only](LICENSE); see [licenses and provenance](THIRD_PARTY_NOTICES.md) for other components.
+## Install
 
-Compatibility testing passed on nearly ten A7C II cameras without boot problems. Unofficial firmware can still affect warranty or prevent a camera from booting. **Do not use this tool if you are unwilling to accept those risks.** Keep your camera-specific backups and use a charged battery. Do not alter firmware offsets, hashes, memory access or write steps without independent validation and recovery capability.
+```bat
+py -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+On Windows the body must be bound to WinUSB for **both** USB identities it uses:
+`054c:0e8a` (mass storage) and `054c:0336` (service). Use Zadig once per identity.
+This stops Windows from mounting the camera as a disk; see `README.zh-CN.md`
+section 4.1 for the exact steps and how to undo it. On Linux/macOS use the system
+libusb and stop the camera volumes from being mounted.
+
+## Usage
+
+```bat
+py -m bind_button.cli functions
+py -m bind_button.cli list
+py -m bind_button.cli discover
+py -m bind_button.cli bind --slot 0x041B --function-id 0x305
+py -m bind_button.cli restore --receipt receipts\bind-0x041b-....json
+```
+
+* `functions` -- offline table of the known compact ids.
+* `list` -- read `0x0400..0x0430` and print every value (read only).
+* `discover` -- snapshot, let the user change one assignment, snapshot again and
+  print which slot moved (read only; `--snapshot`/`--compare` for two sessions).
+* `bind` -- back up the old value, write, read back, save the group, read back
+  again, then print `power-cycle the camera to apply`. Nothing changes until the
+  body is switched off and on.
+* `restore` -- put a receipt's `before` value back and save.
+
+Exit codes: `0` ok, `2` refused by a guard (camera untouched), `1` USB/property
+failure, `130` interrupted.
+
+## Tests
+
+```bat
+py -m unittest discover -s tests -v
+```
+
+All tests are offline: no camera, no pyusb, no USB access.
+
+## Layout
+
+```
+bind_button/session.py       USB session (pyusb + Senser auth), pyusb imported lazily
+bind_button/properties.py    AP property read/write/save with the guards
+bind_button/buttons.py       slot table, compact id table, receipts and snapshots
+bind_button/cli.py           argparse front end
+bind_button/pmca/            MIT subset of Sony-PMCA-RE (+ PMCA_LICENSE.txt)
+docs/DESIGN.zh-CN.md         why a settings write, not a firmware patch; evidence table
+docs/RUNTIME-SESSION.zh-CN.md  archived hardware research log
+tests/                       offline unit tests
+```
+
+## Licensing
+
+`bind_button/pmca/` is a subset of [Sony-PMCA-RE](https://github.com/ma1co/Sony-PMCA-RE)
+by ma1co, MIT licensed; the license text is kept in `bind_button/pmca/PMCA_LICENSE.txt`.
+Sony and ILCE are trademarks of Sony Corporation; this project is not affiliated
+with or endorsed by Sony. The repository's own code has no separate license
+declaration (all rights reserved); check before redistributing.

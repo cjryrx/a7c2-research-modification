@@ -1,6 +1,0 @@
-* text=auto eol=lf
-*.bat text eol=crlf
-*.bin -text
-*.so -text
-*.cat -text
-*.inf -text
