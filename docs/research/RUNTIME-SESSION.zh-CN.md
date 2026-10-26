@@ -99,3 +99,28 @@ dd if=/proc/532/mem bs=1 skip=$((B+0x88d92d8)) count=128
 
 * 没有读出可用位，因此**没有**新的补丁字节；
 * `patches_spotboost.json` 仍为 `status: "unresolved"`，构建依旧会拒绝出包。
+
+## 7. 第一次会话之后：机身开始自动重启（已观察）
+
+拿到 maps 之后，继续尝试读基址时出现连锁失败：
+
+```
+libjit:  ValueError: Unexpected Senser sequence or function
+camera-tools: USBError errno 32 / bulk read 516 bytes failed: USBTimeoutError (10060)
+              "service read did not reach ProductInfo"
+```
+
+随后**机身自行重启**（用户观察）。判读：
+
+* 这是服务模式会话把 USB 服务线程带崩的已知后果（参考项目 `a7c2-re` 的 AGENTS.md 里
+  写明"会话结束后相机停在 054c:096f，Windows 必须断电重启"）。本次是同一个失效模式的
+  更强表现：服务线程崩溃后由固件看门狗重启机身。
+* **没有写任何 flash 内容**：这两条路线的写操作只有 `/tmp/jiritsu/` 下的临时文件
+  （独立分区），以及 p1 门控那种显式流程——本次**没有**跑任何更新/门控写入。
+  已确认写包版本字节仍是 `00 02`（我们自己的 2.00 包），updater 库仍是官方 2.01。
+* 成功那次运行结束时 `libjit_remaining: false`，即载荷 `libJit.so` 已自我删除；
+  残留的只有 1 字节的 `a7c2-exec.{request,start,status,out}`，没有触发路径。
+
+**结论**：这类"一问一答"式的运行时侦察在这台机身/这条通道上代价太高（每次会话都可能
+让服务线程崩溃并要求断电）。若还要继续，必须改成**一次会话内跑完的一条脚本**，并且
+在读取前先把脚本落到相机上（避免每次重传载荷）。
