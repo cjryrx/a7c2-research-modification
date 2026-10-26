@@ -1,0 +1,28 @@
+**/.venv/
+**/a7c2-200-venv/
+**/__pycache__/
+*.py[cod]
+**/runs/
+**/snapshots/
+*.DAT
+BODYDATA_FL23_200_manifest.json
+*.img
+*.log
+.fl23_*
+native/generated/
+
+# ---------------------------------------------------------------------------
+# fork addition: never publish Sony firmware, nor any dump / extraction of it.
+# Everything under this file is source code, docs and this project's own
+# AArch64 worker payloads; BODYDATA*.DAT and the partition images stay local.
+# ---------------------------------------------------------------------------
+*.BIN
+appFw.so
+nflasha*
+CPAPP*.BIN
+CPIMG.DAT
+DMMCFG.BIN
+SYSSOUND.BIN
+*.uxc
+*.uxb
+*.xdb
