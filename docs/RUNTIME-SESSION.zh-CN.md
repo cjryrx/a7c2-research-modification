@@ -609,3 +609,45 @@ tst w0,#0xff  ; b.eq <跳过该槽位>
 
 **当前结论**：需求可实现，但落在"改 UI 资源"或"代码 hook"这一层，
 不是一条命令或一个字节补丁能解决的事。
+
+## 16. 关键结构：固件里"连拍提速"就是"切到 Hi+"
+
+在 `.rodata` 里找到一张 **FUNC id 等价表**（`0x4b96dc0` 起，8 字节一对）：
+
+```
+0x10B5 (FUNC_…switch_cont_shooting_hi_plus)  ↔  0x109F (FUNC_toggle_spot_boost_shooting)
+0x10B4 (FUNC_…switch_cont_shooting)          ↔  0x109E (FUNC_hold_spot_boost_shooting)
+0x10B6 (FUNC_…switch_cont_shooting_hi)       ↔  0x10A0 (FUNC_toggle_timeshift_shooting)
+0x10B3                                        ↔  0x109D (FUNC_evolved_spot_boost_shooting_on_for_haita)
+```
+
+同一批函数还有一张 24 字节步长的三元组表（`0x4b93b20` 起）：
+`{1, 8, X, X, Y, Z}`，例如 `{1, 8, 0x109F, 0x109F, 0x10AA, 0x10B5}`。
+
+**结论（重要）**：固件把「连拍提速（spot boost）」和「切到连拍 Hi+」当成**同一个动作**。
+换句话说，用户想要的"按一下从 MID 跳到 Hi+"，在索尼的实现里就叫 spot boost。
+这解释了两件事：
+
+* 为什么 spot boost 的枚举里有个 `executable_status`（它真的会切驱动模式）；
+* 为什么这两个功能在菜单里一起缺失——它们是同一层被关掉的。
+
+### 16.1 绑定值所在的第三套编号
+
+* 绑定属性里存的值（`0x122/0x300/0x305/0x9C3/…`）在共享名表里对应的是**无关的 PRM 名**，
+  说明它不是 PRM/VAL/FUNC 任何一套编号，而是**菜单项编号**。
+* 这套编号的全集是一张静态数组：**`0x4b9e658`–`0x4ba1454`，2943 项**，
+  我们已知的所有合法值都在里面（`0x122@482、0x300@1241、0x305@1250、0x9C3@1406`）。
+* 数组前面还有一段 181 项的 `{menu_id, index}` 配对表（`0x921→1 … 0x9BF→0xB4`），
+  以及紧挨着的字符串 **`read menu id invalid %d`** —— 证实这些值就是"菜单 id"。
+
+### 16.2 还缺什么
+
+菜单 id → 功能名/动作 的对应，仍然只存在于 **UI 资源（`.uxc`）** 里
+（`custom_key_setting_selecting_*` 布局标识 + `is_valid_custom_key_setting_select_function_item`）。
+所以剩下的唯一"正路"是逆 `.uxc`；否则只能走代码 hook。
+
+### 16.3 下一步建议（明确了）
+
+1. 逆 `.uxc`：只要能读出菜单定义，就能直接找到"切到 Hi+/连拍提速"这一项的菜单 id，
+   再验证它是否可绑（用 bind_button 写 + 重启）；
+2. 或者 hook：把某个已可用菜单项的动作改成 `0x10B5` 的执行路径，代价是要把派发表挖穿。
