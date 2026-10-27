@@ -542,3 +542,70 @@ after save: 00030000
 
 `bind_button` 工具仍然有效：它可以给**任何菜单里存在的功能**换绑（已用 APS-C 选择验证）。
 对连拍提速，它只能等固件侧把该功能放出来之后再用。
+
+## 15. 固件侧继续挖：驱动模式切换功能的真实结构
+
+目标从"连拍提速"改成用户的真实需求：**按一下按钮，把驱动模式从 MID 切到 Hi+**。
+
+### 15.1 功能确实存在
+
+| 名字 | 共享名表 id |
+| --- | --- |
+| `EVENT_FUNC_CUSTOM_SWITCH_DRIVE_MODE_ON` | `0xBAB5` |
+| `EVENT_FUNC_CUSTOM_SWITCH_DRIVE_MODE_OFF` | `0xBAB7` |
+| `FUNC_drive_mode_expanded_option_switch_cont_shooting_hi_plus` | `0x10B5` |
+| `FUNC_drive_mode_expanded_option_switch_cont_shooting` | `0x10B4` |
+| `FUNC_drive_mode_expanded_option_switch_cont_shooting_hi` | `0x10B6` |
+
+`0xBAB5` 在 `.data.rel.ro` 里以**打包形式**出现（`0x07E6BAB5`、`0x07E5BAB5`），
+成组排列（`…BAB4, 2, …BAB5, …BAB6`），像是"模块号<<16 | 事件号"的注册项。
+
+### 15.2 绑定槽位是"逐条 availability 放行"的
+
+`0x2ef9ab8` 起的注册代码对每个槽位做：
+
+```
+mov w0,#0x41b ; movk w0,#0x2cf,lsl#16 ; bl is_param_available
+tst w0,#0xff  ; b.eq <跳过该槽位>
+... 注册成参数号 0x750/0x751/0x752 …
+```
+
+`0x2f7b100` 起是同一批映射（`0x419→0x750`、`0x41a→0x751`、`0x41b→0x752`、
+`0x17e8→0x753`、`0x41c→0x754`、`0x1013→0x755`、`0x41d→0x756`、`0x41e→0x757`）。
+
+### 15.3 关键判定：**属性里存的不是函数 id**
+
+把已知的绑定值拿去查共享名表，命中的都是无关的 PRM：
+
+```
+0x0122 -> PRM_exposure_mode_still_movie_sq_for_setting_file_format
+0x0300 -> PRM_playback_media_full_state_still_slot2
+0x0305 -> PRM_media_disable_format_state_slot1
+0x09C3 -> PRM_movie_eye_af
+```
+
+而真正的功能 id 是 `FUNC_…`（例如切 Hi+ = `0x10B5`）。**所以属性值属于第三套编号**
+（自定义键菜单项编号），与 PRM/VAL/FUNC 名表都不是同一套。
+
+### 15.4 菜单结构的来源是 UI 资源
+
+`custom_key_setting_selecting_layer_group/item`、`…group_number/item_number/layer/column_number`
+这些字符串是 **UI 布局标识**；`is_valid_custom_key_setting_select_function_item`
+的作用是"按菜单类型判断该项是否可选"。也就是说：
+
+> **可分配功能列表来自 UI 资源（`.uxc`），不是代码里的静态表。**
+
+`.uxc` 是压缩格式，本项目尚未逆向。这解释了为什么"驱动模式""连拍提速"都不在菜单里，
+也解释了为什么没有静态白名单可改。
+
+### 15.5 剩下的可行路线（按可行性排序）
+
+1. **改 UI 资源**：把对应条目加进自定义键列表 —— 需要先逆 `.uxc`，工作量大但一次解决；
+2. **代码 hook**：让某个已可用按键的事件派发到
+   `FUNC_drive_mode_expanded_option_switch_cont_shooting_hi_plus` 的执行路径 ——
+   需要找到"事件 → 处理器"的派发表和驱动模式设置函数，属于深层反汇编；
+3. **在可用集合内做文章**：确认 `0x31E/0x31F/0x337/0x35C…` 这些已知可用 id 各自是什么功能，
+   万一其中有能改变驱动模式的（例如自定义驱动模式拨盘位），就能直接绑。
+
+**当前结论**：需求可实现，但落在"改 UI 资源"或"代码 hook"这一层，
+不是一条命令或一个字节补丁能解决的事。
